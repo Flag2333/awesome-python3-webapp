@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+# [python3 ORM重难点]:https://blog.csdn.net/haskei/article/details/57075381
+
 import asyncio, logging
+
+# asyncore是什么？ 他封装了HTTP UDP SSL 的异步协议 可以让单线程 也可以异步收发请求
+# aiohttp，aiomysql是什么？
+# 他们都是基于asyncore 实现的异步http库 异步mysql 库 调用他们就可以实现异步请求在http 和 mysql 上。
+# 记住：一处异步 处处异步
 import aiomysql
 
 
@@ -17,16 +24,20 @@ def log(sql, args=()):
 
 '''创造连接池'''
 
+
 # **kw : [python学习笔记 可变参数关键字参数**kw相关学习]:https://www.cnblogs.com/Commence/p/5578215.html
+# 这里**kw 是一个dict (一个 key value 键值对)
 async def create_pool(loop, **kw):
     logging.info('create database connection pool...')
     # 全局变量，使用global声明
     # 没有用global语句的情况下，是不能修改全局变量的。
+    # _pool 前面一条杠 就是非公开变量 两条杠私有变量 一条杠能调用 两条杠就不允许外部调用
     global _pool
     # 从Python 3.5开始引入了新的语法async和await
     # 把@asyncio.coroutine替换为async；
     # 把yield from替换为await。
     _pool = await aiomysql.create_pool(
+        # 如果kw里面get不到'host' host就默认等于'localhost'
         host=kw.get('host', 'localhost'),
         port=kw.get('port', 3306),
         user=kw['db'],
@@ -79,6 +90,7 @@ async def execute(sql, args, autocommit=true):
     except BaseException as e:
         if not affected:
             await conn.rollback()
+            # raise 用来抛出异常
             raise
     return affected
 
@@ -93,7 +105,19 @@ def create_arg_string(num):
     return ', '.join(L)
 
 
+'''
+Field类的意义：
+将数据库的类型与Python进行对应。
+比如说我们需要对数据库建表或者增删改查 
+数据库的字段不仅有不同类型 
+还有是否为主键的设置，
+这需要我们定一个class 类来进行定义。
+'''
+
+
 class Field(object):
+    '''表的字段包含名字、类型、是否为表的主键和默认值'''
+
     # __init__作用是初始化已实例化后的对象。
     # 子类可以不重写__init__，实例化子类时，会自动调用超类中已定义的__init__
     # 但如果重写了__init__，实例化子类时，则不会隐式的再去调用超类中已定义的__init__，会报错
@@ -104,14 +128,21 @@ class Field(object):
         self.primary_key = primary_key
         self.default = default
 
+    '''返回 表名字 字段名 和字段类型'''
+
     # 在python中方法名如果是__xxxx__()的，那么就有特殊的功能，因此叫做“魔法”方法
     # 当使用print输出对象的时候，只要自己定义了__str__(self)方法，那么就会打印从在这个方法中return的数据
+    # __str__你可以理解为这个类的注释 说明。
     def __str__(self):
         return '<%s, %s:%s>' % (self.__class__.__name__, self.column_type, self.name)
 
 
+'''定义数据库中五个存储类型'''
+
+
 class StringField(Field):
-    '''super ?????????继承?????????'''
+
+    # 这个super()方法用于多态继承的，更新变量 使用。
     def __init__(self, name=None, primary_key=False, default=None, ddl='varchar(100)'):
         super.__init__(name, ddl, primary_key, default)
 
@@ -138,7 +169,17 @@ class TextField(Field):
     def __init__(self, name=None, default=None):
         super().__init__(name, 'text', False, default)
 
+
+'''metaclass 元类'''
+
+
+# metaclass是类的模板，所以必须从`type`类型派生：
 class ModelMetaclass(type):
+
+    # __new__控制__init__的执行，所以在其执行之前
+    # cls:代表要__init__的类，此参数在实例化时由Python解释器自动提供
+    # bases：代表继承父类的集合
+    # attrs：类的方法集合
     def __new__(cls, name, bases, attrs):
         if name == 'Model':
             return type.__new__(cls, name, bases, attrs)
@@ -170,16 +211,16 @@ class ModelMetaclass(type):
         # lambda 函數：
         # 冒号左边→想要传递的参数
         # 冒号右边→想要得到的数（可能带表达式）
-        escaped_fields = list(map(lambda f:'%s' % f, fields))
+        escaped_fields = list(map(lambda f: '%s' % f, fields))
         attrs['__mappings__'] = mappings  # 保存属性和列的映射关系
         attrs['__table__'] = tableName
         attrs['__primary_key__'] = primaryKey  # 主键属性名
         attrs['__fields__'] = fields  # 除主键外的属性名
         attrs['__select__'] = 'select `%s`, %s from `%s`' % (primaryKey, ', '.join(escaped_fields), tableName)
         attrs['__insert__'] = 'insert into `%s` (%s, `%s`) values (%s)' % (
-        tableName, ', '.join(escaped_fields), primaryKey, create_args_string(len(escaped_fields) + 1))
+            tableName, ', '.join(escaped_fields), primaryKey, create_args_string(len(escaped_fields) + 1))
         attrs['__update__'] = 'update `%s` set %s where `%s`=?' % (
-        tableName, ', '.join(map(lambda f: '`%s`=?' % (mappings.get(f).name or f), fields)), primaryKey)
+            tableName, ', '.join(map(lambda f: '`%s`=?' % (mappings.get(f).name or f), fields)), primaryKey)
         attrs['__delete__'] = 'delete from `%s` where `%s`=?' % (tableName, primaryKey)
         return type.__new__(cls, name, bases, attrs)
 
@@ -209,16 +250,77 @@ class Model(dict, metaclass=ModelMetaclass):
                 value = field.default() if callable(field.default) else field.default
                 logging.debug('using default value for %s: %s' % (key, str(value)))
                 setattr(self, key, value)
-        return  value
-'''
+        return value
+
+    # classmethod 修饰符对应的函数不需要实例化，
+    # 可以直接Model.findAll()不需要实例化
+    # 不需要 self 参数，
+    # 但第一个参数需要是表示自身类的 cls 参数，可以来调用类的属性，类的方法，实例化对象等。
+    # 可以直接调用类中的方法 cls（）.方法名（）
     @classmethod
-    async def findAll(cls, where = None, args = None, **kw):
+    async def findAll(cls, where=None, args=None, **kw):
         'find objects by where clause.'
         sql = [cls._select_]
-        if where :
+        if where:
             sql.append('where')
             sql.append(where)
         if args is None:
+            args = []
+        orderBy = kw.get('orderBy', None)
+        if orderBy:
+            sql.append('orderBy')
+            sql.append(orderBy)
+        limit = kw.get('limit', None)
+        if limit is not None:
+            sql.append('limit')
+            # isinstance（）方法判断是否为同一类型
+            if isinstance(limit, int):
+                sql.append('?')
+                args.append(limit)
+            elif isinstance(limit, tuple) and len(limit) == 2:
+                sql.append('?, ?')
+                args.append(limit)
+            else:
+                raise ValueError('Invalid limit value: %s' % str(limit))
+        rs = await select(' '.join(sql), args)
+        return [cls(**r) for r in rs]
 
-'''
+    @classmethod
+    async def findNumber(cls, selectField, where=None, args=None):
+        ' find number by select and where. '
+        sql = ["select %s _num_ from ' %s' " % (selectField, cls._table_)]
+        if where:
+            sql.append('where')
+            sql.append(where)
+        rs = select(' '.join(sql), args, 1)
+        if len(rs) == None:
+            return None
+        return rs[0]['_num_']
 
+    @classmethod
+    async def find(cls, self):
+        ' find object by primary key. '
+        rs = await select("%s where '%s' = ? " % (cls._select_, cls._primary_key_), [pk], 1)
+        if len(re) == 0:
+            return None
+        return cls(**rs[0])
+
+    async def save(self):
+        args = list(map(self.getValueOrDefualt(), self._fields_))
+        args.append(self.getValueOrDefualt(self._primary_key_))
+        rows = await execute(self._insert_, args)
+        if rows == 1:
+            logging.warn('failed to insert record: affected rows: %s' % rows)
+
+    async def update(self):
+        args = list(map(self.getValue(), self._fields_))
+        args.append(self.getValue(self._primary_key_))
+        rows = await execute(self.__update__, args)
+        if rows != 1:
+            logging.warn('failed to update by primary key: affected rows: %s' % rows)
+
+    async def remove(self):
+        args = [self.getValue(self._primary_key_)]
+        rows = await execute(self._delete_, args)
+        if rows != 1:
+            logging.warn('failed to remove by primary key: affected rows: %s' % rows)
