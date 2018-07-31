@@ -97,7 +97,8 @@ async def execute(sql, args, autocommit=true):
 
 '''用‘，’拼接字符串方法'''
 
-
+# 这个函数主要是把查询字段计数 替换成sql识别的?
+# 比如说：insert into  `User` (`password`, `email`, `name`, `id`) values (?,?,?,?)  看到了么 后面这四个问号
 def create_arg_string(num):
     L = []
     for n in range(num):
@@ -114,7 +115,7 @@ Field类的意义：
 这需要我们定一个class 类来进行定义。
 '''
 
-
+# 定义Field类，负责保存(数据库)表的字段名和字段类型
 class Field(object):
     '''表的字段包含名字、类型、是否为表的主键和默认值'''
 
@@ -211,7 +212,7 @@ class ModelMetaclass(type):
         # lambda 函數：
         # 冒号左边→想要传递的参数
         # 冒号右边→想要得到的数（可能带表达式）
-        escaped_fields = list(map(lambda f: '%s' % f, fields))
+        escaped_fields = list(map(lambda f: '`%s`' % f, fields))
         attrs['__mappings__'] = mappings  # 保存属性和列的映射关系
         attrs['__table__'] = tableName
         attrs['__primary_key__'] = primaryKey  # 主键属性名
@@ -288,7 +289,7 @@ class Model(dict, metaclass=ModelMetaclass):
     @classmethod
     async def findNumber(cls, selectField, where=None, args=None):
         ' find number by select and where. '
-        sql = ["select %s _num_ from ' %s' " % (selectField, cls._table_)]
+        sql = ['select %s _num_ from `%s` ' % (selectField, cls._table_)]
         if where:
             sql.append('where')
             sql.append(where)
@@ -300,7 +301,7 @@ class Model(dict, metaclass=ModelMetaclass):
     @classmethod
     async def find(cls, self):
         ' find object by primary key. '
-        rs = await select("%s where '%s' = ? " % (cls._select_, cls._primary_key_), [pk], 1)
+        rs = await select('%s where `%s` = ? ' % (cls._select_, cls._primary_key_), [pk], 1)
         if len(re) == 0:
             return None
         return cls(**rs[0])
