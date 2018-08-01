@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
+# 这样的注释意思是：Python告诉LINUX 去哪个路径下找Python的翻译器
 # -*- coding: utf-8 -*-
+# 这样的注释意思是:　告诉Python解释器，如何解释字符串中的编码类型
 
-# [python3 ORM重难点]:https://blog.csdn.net/haskei/article/details/57075381
+'''
+[python3 ORM重难点]:https://blog.csdn.net/haskei/article/details/57075381
+'''
 
 import asyncio, logging
 
@@ -13,6 +17,8 @@ import aiomysql
 
 
 def log(sql, args=()):
+    ' 记录sql操作 '
+
     # %s：以字符串格式输出
     # %d：以整数方式打印
     # %f：打印浮点数
@@ -22,12 +28,10 @@ def log(sql, args=()):
     logging.info('SQL: %s' % sql)
 
 
-'''创造连接池'''
-
-
 # **kw : [python学习笔记 可变参数关键字参数**kw相关学习]:https://www.cnblogs.com/Commence/p/5578215.html
 # 这里**kw 是一个dict (一个 key value 键值对)
 async def create_pool(loop, **kw):
+    ' 创建全局连接池，**kw 关键字参数集，用于传递host port user password db等的数据库连接参数 '
     logging.info('create database connection pool...')
     # 全局变量，使用global声明
     # 没有用global语句的情况下，是不能修改全局变量的。
@@ -40,19 +44,19 @@ async def create_pool(loop, **kw):
         # 如果kw里面get不到'host' host就默认等于'localhost'
         host=kw.get('host', 'localhost'),
         port=kw.get('port', 3306),
-        user=kw['db'],
-        password=kw.get('charset', 'utf8'),
-        autcommit=kw.get('autocommit', true),
+        user=kw['user'],
+        password=kw['password'],
+        db=kw['db'],
+        charset=kw.get('charset', 'utf8'),
+        autocommit=kw.get('autocommit', True),
         maxsize=kw.get('maxsize', 10),
         minsize=kw.get('minsize', 1),
         loop=loop
     )
 
 
-'''查询方法'''
-
-
 async def select(sql, args, size=None):
+    '查询方法'
     log(sql, args)
     global _pool
     # 获取数据库连接
@@ -72,10 +76,8 @@ async def select(sql, args, size=None):
             return rs
 
 
-'''执行方法'''
-
-
-async def execute(sql, args, autocommit=true):
+async def execute(sql, args, autocommit=True):
+    '执行方法'
     log(sql)
     async with _pool.get() as conn:
         if not autocommit:
@@ -95,11 +97,10 @@ async def execute(sql, args, autocommit=true):
     return affected
 
 
-'''用‘，’拼接字符串方法'''
-
 # 这个函数主要是把查询字段计数 替换成sql识别的?
 # 比如说：insert into  `User` (`password`, `email`, `name`, `id`) values (?,?,?,?)  看到了么 后面这四个问号
-def create_arg_string(num):
+def create_args_string(num):
+    '把查询字段计数 替换成sql识别的'
     L = []
     for n in range(num):
         L.append('?')
@@ -115,9 +116,10 @@ Field类的意义：
 这需要我们定一个class 类来进行定义。
 '''
 
+
 # 定义Field类，负责保存(数据库)表的字段名和字段类型
 class Field(object):
-    '''表的字段包含名字、类型、是否为表的主键和默认值'''
+    ' 表的字段包含名字、类型、是否为表的主键和默认值 '
 
     # __init__作用是初始化已实例化后的对象。
     # 子类可以不重写__init__，实例化子类时，会自动调用超类中已定义的__init__
@@ -145,12 +147,12 @@ class StringField(Field):
 
     # 这个super()方法用于多态继承的，更新变量 使用。
     def __init__(self, name=None, primary_key=False, default=None, ddl='varchar(100)'):
-        super.__init__(name, ddl, primary_key, default)
+        super().__init__(name, ddl, primary_key, default)
 
 
 class BooleanField(Field):
     def __init__(self, name=None, default=False):
-        super.__init__(name, 'boolean', False, default)
+        super().__init__(name, 'boolean', False, default)
 
 
 class IntegerField(Field):
@@ -171,11 +173,9 @@ class TextField(Field):
         super().__init__(name, 'text', False, default)
 
 
-'''metaclass 元类'''
-
-
 # metaclass是类的模板，所以必须从`type`类型派生：
 class ModelMetaclass(type):
+    'metaclass 元类'
 
     # __new__控制__init__的执行，所以在其执行之前
     # cls:代表要__init__的类，此参数在实例化时由Python解释器自动提供
@@ -186,9 +186,9 @@ class ModelMetaclass(type):
             return type.__new__(cls, name, bases, attrs)
         tableName = attrs.get('_table_', None) or name
         logging.info('found model:%s (table:%s)' % (name, tableName))
-        mapings = dict()
+        mappings = dict()
         fields = []
-        primary_key = None
+        primaryKey = None
         for k, v in attrs.items():
             # isinstance()函数来判断一个对象是否是一个已知的类型，类似type()。
             # isinstance()与type()区别：
@@ -197,7 +197,7 @@ class ModelMetaclass(type):
             # 如果要判断两个类型是否相同推荐使用isinstance()。
             if isinstance(v, Field):
                 logging.info('  found mapping: %s ==> %s' % (k, v))
-                mapings[k] = v
+                mappings[k] = v
                 if v.primary_key:
                     if primaryKey:
                         raise StandardError('Duplicate primary key for field: %s' % k)
@@ -206,7 +206,7 @@ class ModelMetaclass(type):
                     fields.append(k)
         if not primaryKey:
             raise StandarError('Primary key not found.')
-        for k in mapings.keys():
+        for k in mappings.keys():
             # pop() 函数用于移除列表中的一个元素（默认最后一个元素），并且返回该元素的值。
             attrs.pop(k)
         # lambda 函數：
@@ -235,7 +235,7 @@ class Model(dict, metaclass=ModelMetaclass):
         try:
             return self[key]
         except KeyError:
-            raise AttributeError(r"'Model' object has no attribute '%s'" % key)
+            raise AttributeError(r"'Model' object has no attribute `%s`" % key)
 
     def __setattr__(self, key, value):
         self[key] = value
@@ -261,6 +261,7 @@ class Model(dict, metaclass=ModelMetaclass):
     @classmethod
     async def findAll(cls, where=None, args=None, **kw):
         'find objects by where clause.'
+
         sql = [cls._select_]
         if where:
             sql.append('where')
@@ -289,6 +290,7 @@ class Model(dict, metaclass=ModelMetaclass):
     @classmethod
     async def findNumber(cls, selectField, where=None, args=None):
         ' find number by select and where. '
+
         sql = ['select %s _num_ from `%s` ' % (selectField, cls._table_)]
         if where:
             sql.append('where')
@@ -301,20 +303,21 @@ class Model(dict, metaclass=ModelMetaclass):
     @classmethod
     async def find(cls, self):
         ' find object by primary key. '
+
         rs = await select('%s where `%s` = ? ' % (cls._select_, cls._primary_key_), [pk], 1)
         if len(re) == 0:
             return None
         return cls(**rs[0])
 
     async def save(self):
-        args = list(map(self.getValueOrDefualt(), self._fields_))
+        args = list(map(self.getValueOrDefualt, self._fields_))
         args.append(self.getValueOrDefualt(self._primary_key_))
         rows = await execute(self._insert_, args)
         if rows == 1:
             logging.warn('failed to insert record: affected rows: %s' % rows)
 
     async def update(self):
-        args = list(map(self.getValue(), self._fields_))
+        args = list(map(self.getValue, self._fields_))
         args.append(self.getValue(self._primary_key_))
         rows = await execute(self.__update__, args)
         if rows != 1:
